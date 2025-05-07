@@ -42,14 +42,16 @@ def extract_receipt_info(text):
     date_pattern = r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{2}, \d{4}\b'
     date_matches = re.findall(date_pattern, text)
 
-    receipts = re.split(r"\n\s*YVES ROCHER", text)
-    receipts = [("YVES ROCHER" + r.strip()) for r in receipts if r.strip()]
+    receipts = re.split(r"\n\s*TRIUMPH", text)
+    receipts = [("TRIUMPH" + r.strip()) for r in receipts if r.strip()]
 
     sales_invoice_receipts = []
     for receipt in receipts:
         match = re.search(r"Receipt\s*Type\s*:\s*(.+)", receipt, re.IGNORECASE)
         if match and match.group(1).strip() == "SALES INVOICE":
-            sales_invoice_receipts.append(receipt)
+            match_reprint = re.search(r"Re-Print", receipt, re.IGNORECASE)
+            if not match_reprint:
+                sales_invoice_receipts.append(receipt)
 
     amount_pattern = r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due:'
     all_amounts = []
