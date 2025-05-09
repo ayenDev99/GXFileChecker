@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import re
-import io
 import pandas as pd
 from datetime import datetime, date
 
@@ -30,20 +29,17 @@ def extract_zread_info(text):
     amount_match = re.search(r"NET SALES\s+([\d,]+\.\d{2})", text)
 
     beginning_si = re.search(r"BEGINNING SI\s+(\d+)", text)
-    beginning_si_count = int(beginning_si.group(1))
-
     ending_si = re.search(r"ENDING SI\s+(\d+)", text)
-    ending_si_count = int(ending_si.group(1))
 
-    if date_range and amount_match:
-        start_date_str  = date_range.group(1)
-        end_date_str    = date_range.group(2)
-        start_date      = datetime.strptime(start_date_str, "%m/%d/%Y").date()
-        end_date        = datetime.strptime(end_date_str, "%m/%d/%Y").date()
+    if date_range and amount_match and beginning_si and ending_si:
+        start_date      = datetime.strptime(date_range.group(1), "%m/%d/%Y").date()
+        end_date        = datetime.strptime(date_range.group(2), "%m/%d/%Y").date()
         amount          = float(amount_match.group(1).replace(",", ""))
-        trans_count = (ending_si_count - beginning_si_count) + 1
-        return start_date, end_date, amount, trans_count
-    return None, None, None, None
+        si_start        = int(beginning_si.group(1))
+        si_end          = int(ending_si.group(1))
+        trans_count     = (si_end - si_start) + 1
+        return start_date, end_date, amount, trans_count, si_start, si_end
+    return None, None, None, None, None, None
 
 def extract_receipt_info(text):
     date_pattern = r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{2}, \d{4}\b'
@@ -52,52 +48,42 @@ def extract_receipt_info(text):
     receipts = re.split(r"\n\s*TRIUMPH", text)
     receipts = [("TRIUMPH" + r.strip()) for r in receipts if r.strip()]
 
-    # Receipt Type
     sales_invoice_receipts = []
+    si_numbers = []
+
     for receipt in receipts:
-        match = re.search(r"Receipt\s*Type\s*:\s*(.+)", receipt, re.IGNORECASE)
-        if match and match.group(1).strip() == "SALES INVOICE":
-            match_reprint = re.search(r"Re-Print", receipt, re.IGNORECASE)
-            if not match_reprint:
-                sales_invoice_receipts.append(receipt)
+        match_type = re.search(r"Receipt\s*Type\s*:\s*(.+)", receipt, re.IGNORECASE)
+        match_si = re.search(r'SI #:\s*(\d+)', receipt)
 
-    # Total Amount Due
-    amount_pattern = r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due:'
+        if match_type and match_type.group(1).strip().upper() == "SALES INVOICE":
+            if not re.search(r"Re-Print", receipt, re.IGNORECASE) and match_si:
+                si_num = int(match_si.group(1))
+                sales_invoice_receipts.append((receipt, si_num))
+                si_numbers.append(si_num)
+
     all_amounts = []
-    for receipt in sales_invoice_receipts:
-        amount_matches = re.findall(amount_pattern, receipt)
+    for receipt, _ in sales_invoice_receipts:
+        amount_matches = re.findall(r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due:', receipt)
         all_amounts.extend(amount_matches)
-
-    # SI #
-    trans_pattern = r'SI #:'
-    all_trans = []
-    for receipt in sales_invoice_receipts:
-        trans_matches = re.findall(trans_pattern, receipt)
-        all_trans.extend(trans_matches)
 
     if date_matches and all_amounts:
         date_val    = datetime.strptime(date_matches[0], "%B %d, %Y").date()
-        amount_val  = sum(float(amount.replace(",", "")) for amount in all_amounts)
-        trans_count = len(all_trans)
-        return date_val, amount_val, trans_count
-    return None, None, None
+        amount_val  = sum(float(a.replace(",", "")) for a in all_amounts)
+        trans_count = len(sales_invoice_receipts)
+        return date_val, amount_val, trans_count, si_numbers
 
-def color_result(val):
-    if val == "MATCH":
-        return 'color: green'
-    else:
-        return 'color: red'
+    return None, None, None, []
 
 def highlight_mismatch_counts(row):
     return [
-        '',  # Date
-        '',  # Z-Read File
-        'color: red' if row["Z-Read Count"] != row["E-Journal Count"] else '',  # Z-Read Count
-        '',  # Z-Read Amount
-        '',  # E-Journal File(s)
-        'color: red' if row["Z-Read Count"] != row["E-Journal Count"] else '',  # E-Journal Count
-        '',  # E-Journal Total
-        'color: green' if row["Result"] == "MATCH" else 'color: red'  # Result
+        ''      # Date
+        , ''    # Z-Read File
+        , 'color: red' if row["Trans Count"] != row["SI Count"] else '' # Trans Count
+        , ''    # Z-Read Amount
+        , ''    # E-Journal File(s)
+        , 'color: red' if row["Trans Count"] != row["SI Count"] else '' # SI Count
+        , ''    # E-Journal Total
+        , 'color: green' if row["Result"] == "MATCH" else 'color: red'  # Result
     ]
 
 ###############################################
@@ -110,58 +96,62 @@ if os.path.exists(folder1):
         if fname.lower().endswith(".txt"):
             with open(os.path.join(folder1, fname), "r", encoding="utf-8") as f:
                 content = f.read()
-                start_date, end_date, amount, z_trans_count = extract_zread_info(content)
-                if start_date and end_date and amount is not None:
-                    if end_date >= start_date_range and start_date <= end_date_range:
+                s_date, e_date, amount, z_count, si_start, si_end = extract_zread_info(content)
+                if s_date and e_date and amount is not None:
+                    if e_date >= start_date_range and s_date <= end_date_range:
                         zread_data.append({
-                            "start_date"        : start_date
-                            , "end_date"        : end_date
+                            "start_date"        : s_date
+                            , "end_date"        : e_date
                             , "file"            : fname
                             , "amount"          : amount
-                            , "z_trans_count"   : z_trans_count
+                            , "z_trans_count"   : z_count
+                            , "si_start"        : si_start
+                            , "si_end"          : si_end
                         })
 else:
-    st.error("❌ Folder 1 not found")
+    st.error("❌ Z-Read folder not found.")
 
 # Collect E-Journal data
-ejournal_data = {}
+ejournal_data = []
 if os.path.exists(folder2):
     for fname in os.listdir(folder2):
         if fname.lower().endswith(".txt"):
             with open(os.path.join(folder2, fname), "r", encoding="utf-8") as f:
                 content = f.read()
-                date_val, amount, trans_count = extract_receipt_info(content)
-                if date_val and amount is not None and start_date_range <= date_val <= end_date_range:
-                    ejournal_data.setdefault(date_val, []).append({
-                        "file": fname
-                        , "amount": amount
+                date_val, amount, trans_count, si_numbers = extract_receipt_info(content)
+                if amount is not None and si_numbers:
+                    ejournal_data.append({
+                        "file"          : fname
+                        , "amount"      : amount
                         , "trans_count" : trans_count
+                        , "si_numbers"  : si_numbers
                     })
 else:
-    st.error("❌ Folder 2 not found")
+    st.error("❌ E-Journal folder not found.")
 
-# Build validation results
+# Validation
 result_table = []
 for z in zread_data:
-    start_date  = z["start_date"]
-    end_date    = z["end_date"]
-    z_file      = z["file"]
-    z_total     = z["amount"]
-    z_count     = z["z_trans_count"]
+    si_start = z["si_start"]
+    si_end = z["si_end"]
 
-    matching_receipts = [r for d in ejournal_data if start_date <= d <= end_date for r in ejournal_data[d]]
+    matching_receipts = []
+    for ej in ejournal_data:
+        if any(si_start <= si <= si_end for si in ej["si_numbers"]):
+            matching_receipts.append(ej)
+
     ej_total = sum(r["amount"] for r in matching_receipts)
     ej_count = sum(r["trans_count"] for r in matching_receipts)
     ej_files = ", ".join(r["file"] for r in matching_receipts) if matching_receipts else "None"
 
-    result = "MATCH" if abs(z_total - ej_total) < 0.01 else "MISMATCH"
+    result = "MATCH" if abs(z["amount"] - ej_total) < 0.01 else "MISMATCH"
     result_table.append({
-        "Date"                  : f"{start_date.strftime('%m/%d/%Y')} - {end_date.strftime('%m/%d/%Y')}"
-        , "Z-Read File"         : z_file
-        , "Z-Read Count"        : z_count
-        , "Z-Read Amount"       : f"₱{z_total:,.2f}"
+        "Date"                  : f"{z['start_date'].strftime('%m/%d/%Y')} - {z['end_date'].strftime('%m/%d/%Y')}"
+        , "Z-Read File"         : z["file"]
+        , "Trans Count"         : z["z_trans_count"]
+        , "Z-Read Amount"       : f"₱{z['amount']:,.2f}"
         , "E-Journal File(s)"   : ej_files
-        , "E-Journal Count"     : ej_count
+        , "SI Count"            : ej_count
         , "E-Journal Total"     : f"₱{ej_total:,.2f}"
         , "Result"              : result
     })
@@ -194,5 +184,4 @@ if result_table:
         , mime      = "text/csv"
     )
 else:
-    st.warning("⚠️ No data found for the selected date range. Try adjusting the folders or dates.")
-    
+    st.warning("⚠️ No matching data found.")
