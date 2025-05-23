@@ -53,9 +53,9 @@ def extract_zread_info(text):
         start_date      = datetime.strptime(date_range.group(1), "%m/%d/%Y").date()
         end_date        = datetime.strptime(date_range.group(2), "%m/%d/%Y").date()
         amount          = float(amount_match.group(1).replace(",", ""))
-        si_start        = int(beginning_si.group(1))
-        si_end          = int(ending_si.group(1))
-        trans_count     = (si_end - si_start) + 1
+        si_start        = beginning_si.group(1)
+        si_end          = ending_si.group(1)
+        trans_count     = (int(si_end) - int(si_start)) + 1
         return start_date, end_date, amount, trans_count, si_start, si_end
     return None, None, None, None, None, None
 
@@ -76,17 +76,15 @@ def extract_receipt_info(text):
                         ,   "type_pattern_2" : r"\s\*{3}\s(.+)"
                     }
 
-    # Validation for receipt header pattern
     if header_keyword in text:
         receipts = re.split(rf"(?=\n\s*{re.escape(header_keyword)})", text)
-        receipts = [r.strip() for r in receipts if header_keyword in r] 
-        
-        # Validation for receipt date pattern
+        receipts = [r.strip() for r in receipts if header_keyword in r]
+
         if date_keyword in date_patterns:
             date_pattern = date_patterns.get(date_keyword)
             date_matches = re.findall(date_pattern, text)
         else:
-            st.error(f"❌ Invalid receipt DATE pattern. Please check the config file.")     
+            st.error(f"❌ Invalid receipt DATE pattern. Please check the config file.")
             st.stop()
             return None, None, None, None
         
@@ -97,10 +95,11 @@ def extract_receipt_info(text):
 
                 if match_receipt_type and "SALES INVOICE" in match_receipt_type.group(1).upper():
                     if "re-print" not in receipt.lower():
-                        match_si = re.search(r'SI\s*#\s*[:]*\s*(\d+)', receipt) # SI #
-                        si_num = int(match_si.group(1))
-                        sales_invoice_receipts.append((receipt, si_num))
-                        si_numbers.append(si_num)
+                        match_si = re.search(r'SI\s*#\s*[:]*\s*(\d+)', receipt)
+                        if match_si:
+                            si_num = int(match_si.group(1))
+                            sales_invoice_receipts.append((receipt, si_num))
+                            si_numbers.append(si_num)
             else:
                 st.error(f"❌ Invalid receipt TYPE pattern. Please check the config file.")
                 st.stop()
@@ -125,9 +124,23 @@ def extract_receipt_info(text):
         return None, None, None, None
 
 def highlight_mismatch_counts(row):
+    # Highlight grand total row
+    if row["Date"] == "GRAND TOTAL":
+        zread = float(str(row["Z-Read Amount"]).replace("₱", "").replace(",", "") or 0)
+        ejournal = float(str(row["E-Journal Total"]).replace("₱", "").replace(",", "") or 0)
+
+        if abs(zread - ejournal) > 0.01:
+            return ['font-weight: bold; background-color: #ffcccc'] * len(row)
+        else:
+            return ['font-weight: bold; background-color: #d4edda'] * len(row)
+    elif row["Date"] == "":
+        return ['background-color: #ffffff'] * len(row)
+
     return [
         ''      # Date
         , ''    # Z-Read File
+        , ''    # Beginning SI
+        , ''    # Ending SI
         , 'color: red' if row["Trans Count"] != row["SI Count"] else '' # Trans Count
         , ''    # Z-Read Amount
         , ''    # E-Journal File(s)
@@ -141,8 +154,7 @@ def highlight_mismatch_counts(row):
 ###############################################
 # Collect Z-Read data
 zread_data = []
-# config = load_config("config.json")
-zread_folder_path  = config.get("zread_folder_path")
+zread_folder_path = config.get("zread_folder_path")
 if os.path.exists(zread_folder_path):
     for fname in os.listdir(zread_folder_path):
         if fname.lower().endswith(".txt"):
@@ -166,7 +178,7 @@ else:
 
 # Collect E-Journal data
 ejournal_data = []
-ejournal_folder_path  = config.get("ejournal_folder_path")
+ejournal_folder_path = config.get("ejournal_folder_path")
 if os.path.exists(ejournal_folder_path):
     for fname in os.listdir(ejournal_folder_path):
         if fname.lower().endswith(".txt"):
@@ -192,7 +204,7 @@ for z in zread_data:
 
     matching_receipts = []
     for ej in ejournal_data:
-        if any(si_start <= si <= si_end for si in ej["si_numbers"]):
+        if any(int(si_start) <= si <= int(si_end) for si in ej["si_numbers"]):
             matching_receipts.append(ej)
 
     ej_total = sum(r["amount"] for r in matching_receipts)
@@ -203,6 +215,8 @@ for z in zread_data:
     result_table.append({
         "Date"                  : f"{z['start_date'].strftime('%m/%d/%Y')} - {z['end_date'].strftime('%m/%d/%Y')}"
         , "Z-Read File"         : z["file"]
+        , "Beginning SI"        : z["si_start"]
+        , "Ending SI"           : z["si_end"]
         , "Trans Count"         : z["z_trans_count"]
         , "Z-Read Amount"       : f"₱{z['amount']:,.2f}"
         , "E-Journal File(s)"   : ej_files
@@ -223,10 +237,29 @@ if result_table:
     col2.metric("Matches", total_match)
     col3.metric("Mismatches", total_mismatch)
 
-    # Show result table with custom styling
+    # Create DataFrame and add grand total row
     df = pd.DataFrame(result_table)
-    styled_df = df.style.apply(highlight_mismatch_counts, axis=1)
 
+    # Grand totals
+    grand_zread_total = sum(float(r["Z-Read Amount"].replace("₱", "").replace(",", "")) for r in result_table)
+    grand_ejournal_total = sum(float(r["E-Journal Total"].replace("₱", "").replace(",", "")) for r in result_table)
+
+    result = "MATCH" if abs(grand_zread_total - grand_ejournal_total) < 0.01 else "MISMATCH"
+    total_row = {
+        "Date": "GRAND TOTAL",
+        "Z-Read File": "",
+        "Beginning SI": "",
+        "Ending SI": "",
+        "Trans Count": "",
+        "Z-Read Amount": f"₱{grand_zread_total:,.2f}",
+        "E-Journal File(s)": "",
+        "SI Count": "",
+        "E-Journal Total": f"₱{grand_ejournal_total:,.2f}",
+        "Result": result
+    }
+
+    df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+    styled_df = df.style.apply(highlight_mismatch_counts, axis=1)
     st.markdown("📊 Validation Table (Per Z-Read File)")
     st.dataframe(styled_df, use_container_width=True)
 
