@@ -3,14 +3,10 @@ import os
 import re
 import pandas as pd
 from datetime import datetime, date
+import json
 
-st.set_page_config(page_title="Z-Read & E-Journal Checker", layout="wide")
-st.title("🧾 Z-Read vs E-Journal Validation")
-
-# Folder Selection
-with st.expander("📁 Folder Selection", expanded=True):
-    folder1 = st.text_input("Z-Read Folder Path", value=r"C:\Users\ZOut")
-    folder2 = st.text_input("E-Journal Folder Path", value=r"C:\Users\BIREjournals")
+st.set_page_config(page_title="GX BIR File Checker", layout="wide")
+st.title("🧾 Z-Read & E-Journal Validation")
 
 # Date Range Picker
 with st.expander("📅 Date Range Filter", expanded=True):
@@ -19,11 +15,33 @@ with st.expander("📅 Date Range Filter", expanded=True):
         st.warning("⚠️ Please select a start and end date.")
         st.stop()
 
+# Global Variables
 start_date_range, end_date_range = date_range
 
 ###############################################
 # Helpers
 ###############################################
+def load_config(config_path="config.json"):
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            if config_path.endswith(".json"):
+                return json.load(f)
+            else:
+                config = {}
+                for line in f:
+                    if '=' in line:
+                        key, value = line.strip().split('=', 1)
+                        config[key.strip()] = value.strip()
+                return config
+    except FileNotFoundError:
+        st.warning(f"⚠️ Config file not found at {config_path}. Using default settings.")
+        return {}
+    except Exception as e:
+        st.error(f"❌ Failed to load config: {e}")
+        return {}
+    
+config = load_config("config.json") 
+
 def extract_zread_info(text):
     date_range = re.search(r"Date Range:\s*(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})", text)
     amount_match = re.search(r"NET SALES\s+([\d,]+\.\d{2})", text)
@@ -42,37 +60,69 @@ def extract_zread_info(text):
     return None, None, None, None, None, None
 
 def extract_receipt_info(text):
-    date_pattern = r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{2}, \d{4}\b'
-    date_matches = re.findall(date_pattern, text)
-
-    receipts = re.split(r"\n\s*TRIUMPH", text)
-    receipts = [("TRIUMPH" + r.strip()) for r in receipts if r.strip()]
-
     sales_invoice_receipts = []
     si_numbers = []
 
-    for receipt in receipts:
-        match_type = re.search(r"Receipt\s*Type\s*:\s*(.+)", receipt, re.IGNORECASE)
-        match_si = re.search(r'SI #:\s*(\d+)', receipt)
+    header_keyword  = config.get("receipt_header_keyword")
+    date_keyword    = config.get("receipt_date_pattern")
+    type_keyword    = config.get("receipt_type_pattern")
 
-        if match_type and match_type.group(1).strip().upper() == "SALES INVOICE":
-            if not re.search(r"Re-Print", receipt, re.IGNORECASE) and match_si:
-                si_num = int(match_si.group(1))
-                sales_invoice_receipts.append((receipt, si_num))
-                si_numbers.append(si_num)
+    date_patterns = {
+                            "date_pattern_1" : r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{2}, \d{4}\b"
+                        ,   "date_pattern_2" : r"\b\d{2}/\d{2}/\d{4} \d{2}:\d{2}\b"
+                    }
+    type_patterns = {
+                            "type_pattern_1" : r"Receipt\s*Type\s*:\s*(.+)"
+                        ,   "type_pattern_2" : r"\s\*{3}\s(.+)"
+                    }
 
-    all_amounts = []
-    for receipt, _ in sales_invoice_receipts:
-        amount_matches = re.findall(r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due:', receipt)
-        all_amounts.extend(amount_matches)
+    # Validation for receipt header pattern
+    if header_keyword in text:
+        receipts = re.split(rf"(?=\n\s*{re.escape(header_keyword)})", text)
+        receipts = [r.strip() for r in receipts if header_keyword in r] 
+        
+        # Validation for receipt date pattern
+        if date_keyword in date_patterns:
+            date_pattern = date_patterns.get(date_keyword)
+            date_matches = re.findall(date_pattern, text)
+        else:
+            st.error(f"❌ Invalid receipt DATE pattern. Please check the config file.")     
+            st.stop()
+            return None, None, None, None
+        
+        for receipt in receipts:
+            type_pattern = type_patterns.get(type_keyword)
+            if type_pattern:
+                match_receipt_type = re.search(type_pattern, receipt, re.IGNORECASE)
 
-    if date_matches and all_amounts:
-        date_val    = datetime.strptime(date_matches[0], "%B %d, %Y").date()
-        amount_val  = sum(float(a.replace(",", "")) for a in all_amounts)
-        trans_count = len(sales_invoice_receipts)
-        return date_val, amount_val, trans_count, si_numbers
+                if match_receipt_type and "SALES INVOICE" in match_receipt_type.group(1).upper():
+                    if "re-print" not in receipt.lower():
+                        match_si = re.search(r'SI\s*#\s*[:]*\s*(\d+)', receipt) # SI #
+                        si_num = int(match_si.group(1))
+                        sales_invoice_receipts.append((receipt, si_num))
+                        si_numbers.append(si_num)
+            else:
+                st.error(f"❌ Invalid receipt TYPE pattern. Please check the config file.")
+                st.stop()
+                return None, None, None, None
 
-    return None, None, None, []
+        all_amounts = []
+        for receipt, _ in sales_invoice_receipts:
+            amount_matches = re.findall(r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*₱([\d,]+\.\d{2})', receipt)
+            amount_matches = [match[0] or match[1] for match in amount_matches if match[0] or match[1]]
+            all_amounts.extend(amount_matches)
+
+        if date_matches and all_amounts:
+            date_val    = pd.to_datetime(date_matches[0]).date()
+            amount_val  = sum(float(a.replace(",", "")) for a in all_amounts)
+            trans_count = len(sales_invoice_receipts)
+            return date_val, amount_val, trans_count, si_numbers
+
+        return None, None, None, []
+    else:
+        st.error(f"❌ Transaction receipt header '{header_keyword}' not found on EJournal receipts. Please check the config file.")
+        st.stop()
+        return None, None, None, None
 
 def highlight_mismatch_counts(row):
     return [
@@ -91,10 +141,12 @@ def highlight_mismatch_counts(row):
 ###############################################
 # Collect Z-Read data
 zread_data = []
-if os.path.exists(folder1):
-    for fname in os.listdir(folder1):
+# config = load_config("config.json")
+zread_folder_path  = config.get("zread_folder_path")
+if os.path.exists(zread_folder_path):
+    for fname in os.listdir(zread_folder_path):
         if fname.lower().endswith(".txt"):
-            with open(os.path.join(folder1, fname), "r", encoding="utf-8") as f:
+            with open(os.path.join(zread_folder_path, fname), "r", encoding="utf-8") as f:
                 content = f.read()
                 s_date, e_date, amount, z_count, si_start, si_end = extract_zread_info(content)
                 if s_date and e_date and amount is not None:
@@ -109,14 +161,16 @@ if os.path.exists(folder1):
                             , "si_end"          : si_end
                         })
 else:
-    st.error("❌ Z-Read folder not found.")
+    st.error("❌ Z-Read folder not found. Please check the folder path in config file.")
+    st.stop()
 
 # Collect E-Journal data
 ejournal_data = []
-if os.path.exists(folder2):
-    for fname in os.listdir(folder2):
+ejournal_folder_path  = config.get("ejournal_folder_path")
+if os.path.exists(ejournal_folder_path):
+    for fname in os.listdir(ejournal_folder_path):
         if fname.lower().endswith(".txt"):
-            with open(os.path.join(folder2, fname), "r", encoding="utf-8") as f:
+            with open(os.path.join(ejournal_folder_path, fname), "r", encoding="utf-8") as f:
                 content = f.read()
                 date_val, amount, trans_count, si_numbers = extract_receipt_info(content)
                 if amount is not None and si_numbers:
@@ -127,7 +181,8 @@ if os.path.exists(folder2):
                         , "si_numbers"  : si_numbers
                     })
 else:
-    st.error("❌ E-Journal folder not found.")
+    st.error("❌ E-Journal folder not found. Please check the folder path in config file.")
+    st.stop()
 
 # Validation
 result_table = []
@@ -184,4 +239,4 @@ if result_table:
         , mime      = "text/csv"
     )
 else:
-    st.warning("⚠️ No matching data found.")
+    st.warning("⚠️ No data found for the selected date range.")
