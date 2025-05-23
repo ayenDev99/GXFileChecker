@@ -18,6 +18,23 @@ with st.expander("📅 Date Range Filter", expanded=True):
 # Global Variables
 start_date_range, end_date_range = date_range
 
+hide_top_space_style = """
+                            <style>
+                                header      {display: none !important;}
+                                #MainMenu   {visibility: hidden;}
+                                footer      {visibility: hidden;}
+                                
+                                .css-18e3th9    {padding-top    : 0rem !important;}
+                                .css-k1vhr4     {margin-top     : 0rem !important;}
+                                div.block-container {
+                                                        padding-top : 15px !important;
+                                                        margin-top  : 0rem !important;
+                                                    }
+                            </style>
+                        """
+st.markdown(hide_top_space_style, unsafe_allow_html=True)
+
+
 ###############################################
 # Helpers
 ###############################################
