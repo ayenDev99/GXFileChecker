@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, date
 import json
 
-st.set_page_config(page_title="GX BIR File Checker", layout="wide")
+st.set_page_config(page_title="GX BIR File Checker", page_icon="gx_icon.png", layout="wide")
 st.title("🧾 Z-Read & E-Journal Validation")
 
 # Date Range Picker
