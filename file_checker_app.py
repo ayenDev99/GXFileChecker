@@ -159,10 +159,10 @@ def highlight_mismatch_counts(row):
         , ''    # Beginning SI
         , ''    # Ending SI
         , 'color: red' if row["Trans Count"] != row["SI Count"] else '' # Trans Count
-        , ''    # Z-Read Amount
+        , 'color: red' if row["Z-Read Amount"] != row["E-Journal Total"] else ''   # Z-Read Amount
         , ''    # E-Journal File(s)
         , 'color: red' if row["Trans Count"] != row["SI Count"] else '' # SI Count
-        , ''    # E-Journal Total
+        , 'color: red' if row["Z-Read Amount"] != row["E-Journal Total"] else ''    # E-Journal Total
         , 'color: green' if row["Result"] == "MATCH" else 'color: red'  # Result
     ]
 
@@ -170,48 +170,49 @@ def highlight_mismatch_counts(row):
 # Start Process
 ###############################################
 # Collect Z-Read data
-zread_data = []
-zread_folder_path = config.get("zread_folder_path")
-if os.path.exists(zread_folder_path):
-    for fname in os.listdir(zread_folder_path):
-        if fname.lower().endswith(".txt"):
-            with open(os.path.join(zread_folder_path, fname), "r", encoding="utf-8") as f:
-                content = f.read()
-                s_date, e_date, amount, z_count, si_start, si_end = extract_zread_info(content)
-                if s_date and e_date and amount is not None:
-                    if e_date >= start_date_range and s_date <= end_date_range:
-                        zread_data.append({
-                            "start_date"        : s_date
-                            , "end_date"        : e_date
-                            , "file"            : fname
-                            , "amount"          : amount
-                            , "z_trans_count"   : z_count
-                            , "si_start"        : si_start
-                            , "si_end"          : si_end
-                        })
-else:
-    st.error("❌ Z-Read folder not found. Please check the folder path in config file.")
-    st.stop()
+with st.spinner("Processing..."):
+    zread_data = []
+    zread_folder_path = config.get("zread_folder_path")
+    if os.path.exists(zread_folder_path):
+        for fname in os.listdir(zread_folder_path):
+            if fname.lower().endswith(".txt"):
+                with open(os.path.join(zread_folder_path, fname), "r", encoding="utf-8") as f:
+                    content = f.read()
+                    s_date, e_date, amount, z_count, si_start, si_end = extract_zread_info(content)
+                    if s_date and e_date and amount is not None:
+                        if e_date >= start_date_range and s_date <= end_date_range:
+                            zread_data.append({
+                                "start_date"        : s_date
+                                , "end_date"        : e_date
+                                , "file"            : fname
+                                , "amount"          : amount
+                                , "z_trans_count"   : z_count
+                                , "si_start"        : si_start
+                                , "si_end"          : si_end
+                            })
+    else:
+        st.error("❌ Z-Read folder not found. Please check the folder path in config file.")
+        st.stop()
 
-# Collect E-Journal data
-ejournal_data = []
-ejournal_folder_path = config.get("ejournal_folder_path")
-if os.path.exists(ejournal_folder_path):
-    for fname in os.listdir(ejournal_folder_path):
-        if fname.lower().endswith(".txt"):
-            with open(os.path.join(ejournal_folder_path, fname), "r", encoding="utf-8") as f:
-                content = f.read()
-                date_val, amount, trans_count, si_numbers = extract_receipt_info(content)
-                if amount is not None and si_numbers:
-                    ejournal_data.append({
-                        "file"          : fname
-                        , "amount"      : amount
-                        , "trans_count" : trans_count
-                        , "si_numbers"  : si_numbers
-                    })
-else:
-    st.error("❌ E-Journal folder not found. Please check the folder path in config file.")
-    st.stop()
+    # Collect E-Journal data
+    ejournal_data = []
+    ejournal_folder_path = config.get("ejournal_folder_path")
+    if os.path.exists(ejournal_folder_path):
+        for fname in os.listdir(ejournal_folder_path):
+            if fname.lower().endswith(".txt"):
+                with open(os.path.join(ejournal_folder_path, fname), "r", encoding="utf-8") as f:
+                    content = f.read()
+                    date_val, amount, trans_count, si_numbers = extract_receipt_info(content)
+                    if amount is not None and si_numbers:
+                        ejournal_data.append({
+                            "file"          : fname
+                            , "amount"      : amount
+                            , "trans_count" : trans_count
+                            , "si_numbers"  : si_numbers
+                        })
+    else:
+        st.error("❌ E-Journal folder not found. Please check the folder path in config file.")
+        st.stop()
 
 # Validation
 result_table = []
