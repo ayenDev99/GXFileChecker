@@ -97,10 +97,11 @@ def extract_receipt_info(text):
     if header_keyword in text:
         receipts = re.split(rf"(?=\n\s*{re.escape(header_keyword)})", text)
         receipts = [r.strip() for r in receipts if header_keyword in r]
-
+        # st.write(receipts)   
         if date_keyword in date_patterns:
             date_pattern = date_patterns.get(date_keyword)
             date_matches = re.findall(date_pattern, text)
+            # st.write(date_matches)
         else:
             st.error(f"❌ Invalid receipt DATE pattern. Please check the config file.")
             st.stop()
@@ -110,6 +111,7 @@ def extract_receipt_info(text):
             type_pattern = type_patterns.get(type_keyword)
             if type_pattern:
                 match_receipt_type = re.search(type_pattern, receipt, re.IGNORECASE)
+                # st.write(match_receipt_type)
 
                 # Filtering receipt type is SALES INVOICE
                 if match_receipt_type and "SALES INVOICE" in match_receipt_type.group(1).upper():
@@ -134,9 +136,10 @@ def extract_receipt_info(text):
         # Collection of SALES INVOICE amounts
         all_amounts = []
         for receipt, _ in sales_invoice_receipts:
-            sales_amt_matches = re.findall(r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*₱([\d,]+\.\d{2})', receipt)
+            sales_amt_matches = re.findall(r'([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*([\d,]+\.\d{2})', receipt)
             sales_amt_matches = [match[0] or match[1] for match in sales_amt_matches if match[0] or match[1]]
             all_amounts.extend(sales_amt_matches)
+            # st.write(sales_amt_matches)
         # Collection of Return amounts
         return_all_amounts = []
         for receipt, _ in return_invoice_receipts:
