@@ -78,6 +78,7 @@ def extract_zread_info(text):
 
 def extract_receipt_info(text):
     sales_invoice_receipts = []
+    return_invoice_receipts = []
     si_numbers = []
 
     header_keyword  = config.get("receipt_header_keyword")
@@ -110,6 +111,7 @@ def extract_receipt_info(text):
             if type_pattern:
                 match_receipt_type = re.search(type_pattern, receipt, re.IGNORECASE)
 
+                # Filtering receipt type is SALES INVOICE
                 if match_receipt_type and "SALES INVOICE" in match_receipt_type.group(1).upper():
                     if "re-print" not in receipt.lower():
                         match_si = re.search(r'SI\s*#\s*[:]*\s*(\d+)', receipt)
@@ -117,21 +119,37 @@ def extract_receipt_info(text):
                             si_num = int(match_si.group(1))
                             sales_invoice_receipts.append((receipt, si_num))
                             si_numbers.append(si_num)
+                # Filtering receipt type is RETURN
+                if match_receipt_type and "RETURN" in match_receipt_type.group(1).upper():
+                    if "RE-PRINT" not in receipt.upper():
+                        return_match_si = re.search(r'Return\s*#\s*[:]*\s*(\d+)', receipt)
+                        if return_match_si:
+                                return_si_num = int(return_match_si.group(1))
+                                return_invoice_receipts.append((receipt, return_si_num))
             else:
                 st.error(f"❌ Invalid receipt TYPE pattern. Please check the config file.")
                 st.stop()
                 return None, None, None, None
 
+        # Collection of SALES INVOICE amounts
         all_amounts = []
         for receipt, _ in sales_invoice_receipts:
-            amount_matches = re.findall(r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*₱([\d,]+\.\d{2})', receipt)
-            amount_matches = [match[0] or match[1] for match in amount_matches if match[0] or match[1]]
-            all_amounts.extend(amount_matches)
+            sales_amt_matches = re.findall(r'₱([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*₱([\d,]+\.\d{2})', receipt)
+            sales_amt_matches = [match[0] or match[1] for match in sales_amt_matches if match[0] or match[1]]
+            all_amounts.extend(sales_amt_matches)
+        # Collection of Return amounts
+        return_all_amounts = []
+        for receipt, _ in return_invoice_receipts:
+            return_amt_matches = re.findall(r'-₱([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*-₱([\d,]+\.\d{2})', receipt)
+            return_amt_matches = [match[0] or match[1] for match in return_amt_matches if match[0] or match[1]]
+            return_all_amounts.extend(return_amt_matches)
 
         if date_matches and all_amounts:
-            date_val    = pd.to_datetime(date_matches[0]).date()
-            amount_val  = sum(float(a.replace(",", "")) for a in all_amounts)
-            trans_count = len(sales_invoice_receipts)
+            date_val            = pd.to_datetime(date_matches[0]).date()  
+            total_return_amt    = sum(float(a.replace(",", "")) for a in return_all_amounts)
+            total_sales_amt     = sum(float(a.replace(",", "")) for a in all_amounts)
+            amount_val          = total_sales_amt - total_return_amt
+            trans_count         = len(sales_invoice_receipts)
             return date_val, amount_val, trans_count, si_numbers
 
         return None, None, None, []
@@ -154,16 +172,16 @@ def highlight_mismatch_counts(row):
         return ['background-color: #ffffff'] * len(row)
 
     return [
-        ''      # Date
-        , ''    # Z-Read File
-        , ''    # Beginning SI
-        , ''    # Ending SI
-        , 'color: red' if row["Trans Count"] != row["SI Count"] else '' # Trans Count
-        , 'color: red' if row["Z-Read Amount"] != row["E-Journal Total"] else ''   # Z-Read Amount
-        , ''    # E-Journal File(s)
-        , 'color: red' if row["Trans Count"] != row["SI Count"] else '' # SI Count
+        ''                                                                          # Date
+        , ''                                                                        # Z-Read File
+        , ''                                                                        # Beginning SI
+        , ''                                                                        # Ending SI
+        , 'color: red' if row["Trans Count"] != row["SI Count"] else ''             # Trans Count
+        , 'color: red' if row["Z-Read Amount"] != row["E-Journal Total"] else ''    # Z-Read Amount
+        , ''                                                                        # E-Journal File(s)
+        , 'color: red' if row["Trans Count"] != row["SI Count"] else ''             # SI Count
         , 'color: red' if row["Z-Read Amount"] != row["E-Journal Total"] else ''    # E-Journal Total
-        , 'color: green' if row["Result"] == "MATCH" else 'color: red'  # Result
+        , 'color: green' if row["Result"] == "MATCH" else 'color: red'              # Result
     ]
 
 ###############################################
