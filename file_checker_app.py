@@ -72,8 +72,9 @@ def extract_zread_info(text):
         amount          = float(amount_match.group(1).replace(",", ""))
         si_start        = beginning_si.group(1)
         si_end          = ending_si.group(1)
-        trans_count     = (int(si_end) - int(si_start)) + 1
-        return start_date, end_date, amount, trans_count, si_start, si_end
+        trans_count     = (int(si_end) - int(si_start))
+        tot_trans_count = (trans_count) + (1 if (trans_count) != 0 else 0)
+        return start_date, end_date, amount, tot_trans_count, si_start, si_end
     return None, None, None, None, None, None
 
 def extract_receipt_info(text):
@@ -105,7 +106,7 @@ def extract_receipt_info(text):
         else:
             st.error(f"❌ Invalid receipt DATE pattern. Please check the config file.")
             st.stop()
-            return None, None, None, None
+            return None, None, None, None, []
         
         for receipt in receipts:
             type_pattern = type_patterns.get(type_keyword)
@@ -126,12 +127,12 @@ def extract_receipt_info(text):
                     if "RE-PRINT" not in receipt.upper():
                         return_match_si = re.search(r'Return\s*#\s*[:]*\s*(\d+)', receipt)
                         if return_match_si:
-                                return_si_num = int(return_match_si.group(1))
-                                return_invoice_receipts.append((receipt, return_si_num))
+                            return_si_num = int(return_match_si.group(1))
+                            return_invoice_receipts.append((receipt, return_si_num))
             else:
                 st.error(f"❌ Invalid receipt TYPE pattern. Please check the config file.")
                 st.stop()
-                return None, None, None, None
+                return None, None, None, None, []
 
         # Collection of SALES INVOICE amounts
         all_amounts = []
@@ -152,15 +153,16 @@ def extract_receipt_info(text):
             date_val            = pd.to_datetime(date_matches[0]).date()  
             total_return_amt    = sum(float(a.replace(",", "")) for a in return_all_amounts)
             total_sales_amt     = sum(float(a.replace(",", "")) for a in all_amounts)
-            amount_val          = total_sales_amt - total_return_amt
+            amount_val          = (total_sales_amt - total_return_amt) if (total_sales_amt - total_return_amt) else 0
             trans_count         = len(sales_invoice_receipts)
-            return date_val, amount_val, trans_count, si_numbers
+            skipped_si          = [i for i in range(si_numbers[0], si_numbers[-1]+1) if i not in si_numbers]
+            return date_val, amount_val, trans_count, si_numbers, skipped_si
 
-        return None, None, None, []
+        return None, None, None, None, []
     else:
         st.error(f"❌ Transaction receipt header '{header_keyword}' not found on EJournal receipts. Please check the config file.")
         st.stop()
-        return None, None, None, None
+        return None, None, None, None, []
 
 def highlight_mismatch_counts(row):
     # Highlight grand total row
@@ -185,6 +187,7 @@ def highlight_mismatch_counts(row):
         , ''                                                                        # E-Journal File(s)
         , 'color: red' if row["Trans Count"] != row["SI Count"] else ''             # SI Count
         , 'color: red' if row["Z-Read Amount"] != row["E-Journal Total"] else ''    # E-Journal Total
+        , 'color: red'                                                              # Skipped SI
         , 'color: green' if row["Result"] == "MATCH" else 'color: red'              # Result
     ]
 
@@ -224,14 +227,14 @@ with st.spinner("Processing..."):
             if fname.lower().endswith(".txt"):
                 with open(os.path.join(ejournal_folder_path, fname), "r", encoding="utf-8") as f:
                     content = f.read()
-                    date_val, amount, trans_count, si_numbers = extract_receipt_info(content)
-                    if amount is not None and si_numbers:
-                        ejournal_data.append({
-                            "file"          : fname
-                            , "amount"      : amount
-                            , "trans_count" : trans_count
-                            , "si_numbers"  : si_numbers
-                        })
+                    date_val, amount, trans_count, si_numbers, skipped_si = extract_receipt_info(content)
+                    ejournal_data.append({
+                        "file"          : fname
+                        , "amount"      : amount
+                        , "trans_count" : trans_count
+                        , "si_numbers"  : si_numbers
+                        , "skipped_si"  : ", ".join(map(str, skipped_si))
+                    })
     else:
         st.error("❌ E-Journal folder not found. Please check the folder path in config file.")
         st.stop()
@@ -244,12 +247,16 @@ for z in zread_data:
 
     matching_receipts = []
     for ej in ejournal_data:
-        if any(int(si_start) <= si <= int(si_end) for si in ej["si_numbers"]):
-            matching_receipts.append(ej)
+        if ej["si_numbers"]:
+            if any(int(si_start) <= si <= int(si_end) for si in ej["si_numbers"]):
+                matching_receipts.append(ej)
+        else:
+            pass
 
-    ej_total = sum(r["amount"] for r in matching_receipts)
-    ej_count = sum(r["trans_count"] for r in matching_receipts)
+    ej_total = sum(r["amount"] if r["amount"] else 0 for r in matching_receipts)
+    ej_count = sum(r["trans_count"] if r["trans_count"] else 0 for r in matching_receipts)
     ej_files = ", ".join(r["file"] for r in matching_receipts) if matching_receipts else "None"
+    ej_skip = ", ".join(r["skipped_si"] for r in matching_receipts) if matching_receipts else ""
 
     result = "MATCH" if abs(z["amount"] - ej_total) < 0.01 else "MISMATCH"
     result_table.append({
@@ -262,6 +269,7 @@ for z in zread_data:
         , "E-Journal File(s)"   : ej_files
         , "SI Count"            : ej_count
         , "E-Journal Total"     : f"₱{ej_total:,.2f}"
+        , "Skipped SI"          : ej_skip
         , "Result"              : result
     })
 
