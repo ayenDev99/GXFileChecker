@@ -143,9 +143,10 @@ def extract_receipt_info(text):
         # Collection of Return amounts
         return_all_amounts = []
         for receipt, _ in return_invoice_receipts:
-            return_amt_matches = re.findall(r'-₱([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*-₱([\d,]+\.\d{2})', receipt)
+            return_amt_matches = re.findall(r'([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*([\d,]+\.\d{2})', receipt)
             return_amt_matches = [match[0] or match[1] for match in return_amt_matches if match[0] or match[1]]
             return_all_amounts.extend(return_amt_matches)
+            # st.write(return_amt_matches)
 
         if date_matches and all_amounts:
             date_val            = pd.to_datetime(date_matches[0]).date()  
