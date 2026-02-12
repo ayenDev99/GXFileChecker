@@ -4,9 +4,28 @@ import re
 import pandas as pd
 from datetime import datetime, date
 import json
+import logging
+
+# Create logs folder if not exists
+os.makedirs("logs", exist_ok=True)
+
+# Configure logging
+log_filename = f"logs/validation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.FileHandler(log_filename, encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="GX BIR File Checker", page_icon="gx_icon.png", layout="wide")
 st.title("🧾 Z-Read & E-Journal Validation")
+
 
 # Date Range Picker
 with st.expander("📅 Date Range Filter", expanded=True):
@@ -17,6 +36,10 @@ with st.expander("📅 Date Range Filter", expanded=True):
 
 # Global Variables
 start_date_range, end_date_range = date_range
+
+logger.info("Application started")
+logger.info(f"Date filter selected: {start_date_range} to {end_date_range}")
+
 
 hide_top_space_style = """
                             <style>
@@ -155,7 +178,10 @@ def extract_receipt_info(text):
             total_sales_amt     = sum(float(a.replace(",", "")) for a in all_amounts)
             amount_val          = (total_sales_amt - total_return_amt) if (total_sales_amt - total_return_amt) else 0
             trans_count         = len(sales_invoice_receipts)
-            skipped_si          = [i for i in range(si_numbers[0], si_numbers[-1]+1) if i not in si_numbers]
+            if si_numbers:
+                skipped_si = [i for i in range(min(si_numbers), max(si_numbers)+1) if i not in si_numbers]
+            else:
+                skipped_si = []
             return date_val, amount_val, trans_count, si_numbers, skipped_si
 
         return None, None, None, None, []
@@ -200,6 +226,9 @@ with st.spinner("Processing..."):
     zread_folder_path = config.get("zread_folder_path")
     if os.path.exists(zread_folder_path):
         for fname in os.listdir(zread_folder_path):
+            
+            logger.info(f"Processing Z-Read file: {fname}")
+
             if fname.lower().endswith(".txt"):
                 with open(os.path.join(zread_folder_path, fname), "r", encoding="utf-8") as f:
                     content = f.read()
@@ -215,11 +244,22 @@ with st.spinner("Processing..."):
                                 , "si_start"        : si_start
                                 , "si_end"          : si_end
                             })
+        logger.info(
+            f"Z-Read Extracted | File: {fname} | "
+            f"Date: {s_date} - {e_date} | "
+            f"Amount: {amount} | "
+            f"SI: {si_start}-{si_end}"
+        )
+
     else:
+        logger.warning(f"Failed to extract data from Z-Read file: {fname}")
+
         st.error("❌ Z-Read folder not found. Please check the folder path in config file.")
         st.stop()
 
     # Collect E-Journal data
+    logger.info(f"Processing E-Journal file: {fname}")
+
     ejournal_data = []
     ejournal_folder_path = config.get("ejournal_folder_path")
     if os.path.exists(ejournal_folder_path):
@@ -228,14 +268,27 @@ with st.spinner("Processing..."):
                 with open(os.path.join(ejournal_folder_path, fname), "r", encoding="utf-8") as f:
                     content = f.read()
                     date_val, amount, trans_count, si_numbers, skipped_si = extract_receipt_info(content)
-                    ejournal_data.append({
-                        "file"          : fname
-                        , "amount"      : amount
-                        , "trans_count" : trans_count
-                        , "si_numbers"  : si_numbers
-                        , "skipped_si"  : ", ".join(map(str, skipped_si))
-                    })
+                    logger.info(
+                        f"E-Journal Extracted | File: {fname} | "
+                        f"Date: {date_val} | "
+                        f"Amount: {amount} | "
+                        f"Transactions: {trans_count}"
+                    )
+                    if date_val and start_date_range <= date_val <= end_date_range:
+                        ejournal_data.append({
+                            "file"          : fname,
+                            "date"          : date_val,
+                            "amount"        : amount,
+                            "trans_count"   : trans_count,
+                            "si_numbers"    : si_numbers,
+                            "skipped_si"    : ", ".join(map(str, skipped_si))
+                        })
+
+      
+
     else:
+        logger.warning(f"No valid receipts found in: {fname}")
+
         st.error("❌ E-Journal folder not found. Please check the folder path in config file.")
         st.stop()
 
@@ -244,6 +297,11 @@ result_table = []
 for z in zread_data:
     si_start = z["si_start"]
     si_end = z["si_end"]
+
+    logger.info(
+        f"Matching Z-Read {z['file']} "
+        f"SI Range: {si_start}-{si_end}"
+    )
 
     matching_receipts = []
     for ej in ejournal_data:
@@ -272,6 +330,12 @@ for z in zread_data:
         , "Skipped SI"          : ej_skip
         , "Result"              : result
     })
+    logger.info(
+        f"Match Result | Z-Read: {z['file']} | "
+        f"Z Amount: {z['amount']} | "
+        f"E-Journal Total: {ej_total} | "
+        f"Result: {result}"
+    )
 
 # Show Summary & Table
 if result_table:
