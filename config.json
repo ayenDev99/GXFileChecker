@@ -1,7 +1,7 @@
 {
-    "zread_folder_path"       : "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut"
-  , "ejournal_folder_path"    : "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals"
-  , "receipt_header_keyword"  : "TRIUMPH"
-  , "receipt_date_pattern"    : "date_pattern_1"
-  , "receipt_type_pattern"    : "type_pattern_1"
+    "zread_folder_path"       : "C:\\Z_TEST\\GXFileChecker\\ZOut\\Timex"
+  , "ejournal_folder_path"    : "C:\\Z_TEST\\GXFileChecker\\BIREjournals\\Timex"
+  , "receipt_header_keyword"  : "Owned and Operated"
+  , "receipt_date_pattern"    : "date_pattern_2"
+  , "receipt_type_pattern"    : "type_pattern_2"
 }

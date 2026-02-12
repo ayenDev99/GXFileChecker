@@ -118,14 +118,17 @@ def extract_receipt_info(text):
                 if match_receipt_type and "SALES INVOICE" in match_receipt_type.group(1).upper():
                     if "re-print" not in receipt.lower():
                         match_si = re.search(r'SI\s*#\s*[:]*\s*(\d+)', receipt)
+                        # st.write(match_si)
                         if match_si:
                             si_num = int(match_si.group(1))
                             sales_invoice_receipts.append((receipt, si_num))
                             si_numbers.append(si_num)
                 # Filtering receipt type is RETURN
+                
                 if match_receipt_type and "RETURN" in match_receipt_type.group(1).upper():
                     if "RE-PRINT" not in receipt.upper():
                         return_match_si = re.search(r'Return\s*#\s*[:]*\s*(\d+)', receipt)
+                        # st.write(return_match_si)
                         if return_match_si:
                             return_si_num = int(return_match_si.group(1))
                             return_invoice_receipts.append((receipt, return_si_num))
@@ -142,12 +145,25 @@ def extract_receipt_info(text):
             all_amounts.extend(sales_amt_matches)
             # st.write(sales_amt_matches)
         # Collection of Return amounts
+        amount_patterns = {
+                            "amount_pattern_1"      : r"(?:([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*([\d,]+\.\d{2}))"
+                            , "amount_pattern_2"    : r"\(\s*Php\s*([\d,]+\.\d{2})\s*\)"
+                        }
+
         return_all_amounts = []
-        for receipt, _ in return_invoice_receipts:
-            return_amt_matches = re.findall(r'([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*([\d,]+\.\d{2})', receipt)
-            return_amt_matches = [match[0] or match[1] for match in return_amt_matches if match[0] or match[1]]
-            return_all_amounts.extend(return_amt_matches)
-            # st.write(return_amt_matches)
+        for pattern in amount_patterns.values():
+            for receipt, _ in return_invoice_receipts:
+                matches = re.findall(pattern, receipt, re.IGNORECASE)
+                
+                # Flatten if tuple results
+                if matches and isinstance(matches[0], tuple):
+                    matches = [amt for tup in matches for amt in tup if amt]
+                
+                if matches:
+                    return_all_amounts.extend(matches)
+
+                    # break
+        # st.write(return_all_amounts)
 
         if date_matches and all_amounts:
             date_val            = pd.to_datetime(date_matches[0]).date()  
@@ -155,7 +171,10 @@ def extract_receipt_info(text):
             total_sales_amt     = sum(float(a.replace(",", "")) for a in all_amounts)
             amount_val          = (total_sales_amt - total_return_amt) if (total_sales_amt - total_return_amt) else 0
             trans_count         = len(sales_invoice_receipts)
-            skipped_si          = [i for i in range(si_numbers[0], si_numbers[-1]+1) if i not in si_numbers]
+            if si_numbers:
+                skipped_si = [i for i in range(min(si_numbers), max(si_numbers)+1) if i not in si_numbers]
+            else:
+                skipped_si = []
             return date_val, amount_val, trans_count, si_numbers, skipped_si
 
         return None, None, None, None, []
@@ -200,6 +219,7 @@ with st.spinner("Processing..."):
     zread_folder_path = config.get("zread_folder_path")
     if os.path.exists(zread_folder_path):
         for fname in os.listdir(zread_folder_path):
+            
             if fname.lower().endswith(".txt"):
                 with open(os.path.join(zread_folder_path, fname), "r", encoding="utf-8") as f:
                     content = f.read()
@@ -215,6 +235,7 @@ with st.spinner("Processing..."):
                                 , "si_start"        : si_start
                                 , "si_end"          : si_end
                             })
+
     else:
         st.error("❌ Z-Read folder not found. Please check the folder path in config file.")
         st.stop()
@@ -228,13 +249,19 @@ with st.spinner("Processing..."):
                 with open(os.path.join(ejournal_folder_path, fname), "r", encoding="utf-8") as f:
                     content = f.read()
                     date_val, amount, trans_count, si_numbers, skipped_si = extract_receipt_info(content)
-                    ejournal_data.append({
-                        "file"          : fname
-                        , "amount"      : amount
-                        , "trans_count" : trans_count
-                        , "si_numbers"  : si_numbers
-                        , "skipped_si"  : ", ".join(map(str, skipped_si))
-                    })
+
+                    if date_val and start_date_range <= date_val <= end_date_range:
+                        ejournal_data.append({
+                            "file"          : fname,
+                            "date"          : date_val,
+                            "amount"        : amount,
+                            "trans_count"   : trans_count,
+                            "si_numbers"    : si_numbers,
+                            "skipped_si"    : ", ".join(map(str, skipped_si))
+                        })
+
+      
+
     else:
         st.error("❌ E-Journal folder not found. Please check the folder path in config file.")
         st.stop()
