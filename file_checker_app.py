@@ -4,28 +4,9 @@ import re
 import pandas as pd
 from datetime import datetime, date
 import json
-import logging
-
-# Create logs folder if not exists
-os.makedirs("logs", exist_ok=True)
-
-# Configure logging
-log_filename = f"logs/validation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler(log_filename, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
-
-logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="GX BIR File Checker", page_icon="gx_icon.png", layout="wide")
 st.title("🧾 Z-Read & E-Journal Validation")
-
 
 # Date Range Picker
 with st.expander("📅 Date Range Filter", expanded=True):
@@ -36,10 +17,6 @@ with st.expander("📅 Date Range Filter", expanded=True):
 
 # Global Variables
 start_date_range, end_date_range = date_range
-
-logger.info("Application started")
-logger.info(f"Date filter selected: {start_date_range} to {end_date_range}")
-
 
 hide_top_space_style = """
                             <style>
@@ -93,102 +70,108 @@ def extract_zread_info(text):
         start_date      = datetime.strptime(date_range.group(1), "%m/%d/%Y").date()
         end_date        = datetime.strptime(date_range.group(2), "%m/%d/%Y").date()
         amount          = float(amount_match.group(1).replace(",", ""))
-        si_start        = beginning_si.group(1)
-        si_end          = ending_si.group(1)
-        trans_count     = (int(si_end) - int(si_start))
-        tot_trans_count = (trans_count) + (1 if (trans_count) != 0 else 0)
+        si_start        = int(beginning_si.group(1))
+        si_end          = int(ending_si.group(1))
+        # trans_count     = (int(si_end) - int(si_start))
+        # Calculate transaction count including single transaction
+        if si_start == 0 and si_end == 0:
+            trans_count = 0
+        else:
+            trans_count = si_end - si_start + 1  # inclusive count
+
+        tot_trans_count = trans_count
         return start_date, end_date, amount, tot_trans_count, si_start, si_end
     return None, None, None, None, None, None
 
 def extract_receipt_info(text):
-    sales_invoice_receipts = []
-    return_invoice_receipts = []
+
+    sales_amounts = []
+    return_amounts = []
     si_numbers = []
+    return_numbers = []
+    date_val = None
 
-    header_keyword  = config.get("receipt_header_keyword")
-    date_keyword    = config.get("receipt_date_pattern")
-    type_keyword    = config.get("receipt_type_pattern")
+    # Split keeping type
+    parts = re.split(
+        r"\*{3}\s*(SALES INVOICE|Return)\s*\*{3}",
+        text,
+        flags=re.IGNORECASE
+    )
 
-    date_patterns = {
-                            "date_pattern_1" : r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{2}, \d{4}\b"
-                        ,   "date_pattern_2" : r"\b\d{2}/\d{2}/\d{4} \d{2}:\d{2}\b"
-                    }
-    type_patterns = {
-                            "type_pattern_1" : r"Receipt\s*Type\s*:\s*(.+)"
-                        ,   "type_pattern_2" : r"\s\*{3}\s(.+)"
-                    }
+    # parts structure:
+    # [header, type1, content1, type2, content2, ...]
 
-    if header_keyword in text:
-        receipts = re.split(rf"(?=\n\s*{re.escape(header_keyword)})", text)
-        receipts = [r.strip() for r in receipts if header_keyword in r]
-        # st.write(receipts)   
-        if date_keyword in date_patterns:
-            date_pattern = date_patterns.get(date_keyword)
-            date_matches = re.findall(date_pattern, text)
-            # st.write(date_matches)
-        else:
-            st.error(f"❌ Invalid receipt DATE pattern. Please check the config file.")
-            st.stop()
-            return None, None, None, None, []
-        
-        for receipt in receipts:
-            type_pattern = type_patterns.get(type_keyword)
-            if type_pattern:
-                match_receipt_type = re.search(type_pattern, receipt, re.IGNORECASE)
-                # st.write(match_receipt_type)
+    for i in range(1, len(parts), 2):
+        doc_type = parts[i].strip().upper()
+        content = parts[i+1]
 
-                # Filtering receipt type is SALES INVOICE
-                if match_receipt_type and "SALES INVOICE" in match_receipt_type.group(1).upper():
-                    if "re-print" not in receipt.lower():
-                        match_si = re.search(r'SI\s*#\s*[:]*\s*(\d+)', receipt)
-                        if match_si:
-                            si_num = int(match_si.group(1))
-                            sales_invoice_receipts.append((receipt, si_num))
-                            si_numbers.append(si_num)
-                # Filtering receipt type is RETURN
-                if match_receipt_type and "RETURN" in match_receipt_type.group(1).upper():
-                    if "RE-PRINT" not in receipt.upper():
-                        return_match_si = re.search(r'Return\s*#\s*[:]*\s*(\d+)', receipt)
-                        if return_match_si:
-                            return_si_num = int(return_match_si.group(1))
-                            return_invoice_receipts.append((receipt, return_si_num))
-            else:
-                st.error(f"❌ Invalid receipt TYPE pattern. Please check the config file.")
-                st.stop()
-                return None, None, None, None, []
+        # Extract date once
+        if not date_val:
+            date_match = re.search(
+                r"\d{1,2}:\d{2}\s*(?:am|pm),\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{2},\s+\d{4}",
+                content,
+                re.IGNORECASE
+            )
+            if date_match:
+                date_str = date_match.group(0).split(", ", 1)[1]
+                date_val = datetime.strptime(date_str, "%B %d, %Y").date()
 
-        # Collection of SALES INVOICE amounts
-        all_amounts = []
-        for receipt, _ in sales_invoice_receipts:
-            sales_amt_matches = re.findall(r'([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*([\d,]+\.\d{2})', receipt)
-            sales_amt_matches = [match[0] or match[1] for match in sales_amt_matches if match[0] or match[1]]
-            all_amounts.extend(sales_amt_matches)
-            # st.write(sales_amt_matches)
-        # Collection of Return amounts
-        return_all_amounts = []
-        for receipt, _ in return_invoice_receipts:
-            return_amt_matches = re.findall(r'([\d,]+\.\d{2})\s*\n?Total Amount Due|Total Amount Due\s*([\d,]+\.\d{2})', receipt)
-            return_amt_matches = [match[0] or match[1] for match in return_amt_matches if match[0] or match[1]]
-            return_all_amounts.extend(return_amt_matches)
-            # st.write(return_amt_matches)
+        # SALES
+        if "SALES INVOICE" in doc_type:
 
-        if date_matches and all_amounts:
-            date_val            = pd.to_datetime(date_matches[0]).date()  
-            total_return_amt    = sum(float(a.replace(",", "")) for a in return_all_amounts)
-            total_sales_amt     = sum(float(a.replace(",", "")) for a in all_amounts)
-            amount_val          = (total_sales_amt - total_return_amt) if (total_sales_amt - total_return_amt) else 0
-            trans_count         = len(sales_invoice_receipts)
-            if si_numbers:
-                skipped_si = [i for i in range(min(si_numbers), max(si_numbers)+1) if i not in si_numbers]
-            else:
-                skipped_si = []
-            return date_val, amount_val, trans_count, si_numbers, skipped_si
+            si_match = re.search(r"SI\s*#\s*:\s*(\d+)", content)
+            if si_match:
+                si_numbers.append(int(si_match.group(1)))
 
-        return None, None, None, None, []
-    else:
-        st.error(f"❌ Transaction receipt header '{header_keyword}' not found on EJournal receipts. Please check the config file.")
-        st.stop()
-        return None, None, None, None, []
+            amount_match = re.search(
+                r"Subtotal\s*:\s*([\d,]+\.\d{2})",
+                content,
+                re.IGNORECASE
+            )
+
+            if amount_match:
+                sales_amounts.append(
+                    float(amount_match.group(1).replace(",", ""))
+                )
+
+        # RETURN
+        elif "RETURN" in doc_type:
+
+            return_match = re.search(r"Return\s*#\s*:\s*(\d+)", content)
+            if return_match:
+                return_numbers.append(int(return_match.group(1)))
+
+            amount_match = re.search(
+                r"Subtotal\s*:\s*-\s*([\d,]+\.\d{2})",
+                content,
+                re.IGNORECASE
+            )
+
+            if amount_match:
+                return_amounts.append(
+                    float(amount_match.group(1).replace(",", ""))
+                )
+
+    total_sales = sum(sales_amounts)
+    total_returns = sum(return_amounts)
+    net_amount = total_sales - total_returns
+
+    total_trans_count = len(si_numbers)
+
+    skipped_si = []
+    if si_numbers:
+        skipped_si = [
+            i for i in range(min(si_numbers), max(si_numbers)+1)
+            if i not in si_numbers
+        ]
+
+    return (
+        date_val,
+        net_amount,
+        total_trans_count,
+        si_numbers,
+        skipped_si
+    )
 
 def highlight_mismatch_counts(row):
     # Highlight grand total row
@@ -227,8 +210,6 @@ with st.spinner("Processing..."):
     if os.path.exists(zread_folder_path):
         for fname in os.listdir(zread_folder_path):
             
-            logger.info(f"Processing Z-Read file: {fname}")
-
             if fname.lower().endswith(".txt"):
                 with open(os.path.join(zread_folder_path, fname), "r", encoding="utf-8") as f:
                     content = f.read()
@@ -244,22 +225,12 @@ with st.spinner("Processing..."):
                                 , "si_start"        : si_start
                                 , "si_end"          : si_end
                             })
-        logger.info(
-            f"Z-Read Extracted | File: {fname} | "
-            f"Date: {s_date} - {e_date} | "
-            f"Amount: {amount} | "
-            f"SI: {si_start}-{si_end}"
-        )
 
     else:
-        logger.warning(f"Failed to extract data from Z-Read file: {fname}")
-
         st.error("❌ Z-Read folder not found. Please check the folder path in config file.")
         st.stop()
 
     # Collect E-Journal data
-    logger.info(f"Processing E-Journal file: {fname}")
-
     ejournal_data = []
     ejournal_folder_path = config.get("ejournal_folder_path")
     if os.path.exists(ejournal_folder_path):
@@ -268,12 +239,7 @@ with st.spinner("Processing..."):
                 with open(os.path.join(ejournal_folder_path, fname), "r", encoding="utf-8") as f:
                     content = f.read()
                     date_val, amount, trans_count, si_numbers, skipped_si = extract_receipt_info(content)
-                    logger.info(
-                        f"E-Journal Extracted | File: {fname} | "
-                        f"Date: {date_val} | "
-                        f"Amount: {amount} | "
-                        f"Transactions: {trans_count}"
-                    )
+
                     if date_val and start_date_range <= date_val <= end_date_range:
                         ejournal_data.append({
                             "file"          : fname,
@@ -287,8 +253,6 @@ with st.spinner("Processing..."):
       
 
     else:
-        logger.warning(f"No valid receipts found in: {fname}")
-
         st.error("❌ E-Journal folder not found. Please check the folder path in config file.")
         st.stop()
 
@@ -297,11 +261,6 @@ result_table = []
 for z in zread_data:
     si_start = z["si_start"]
     si_end = z["si_end"]
-
-    logger.info(
-        f"Matching Z-Read {z['file']} "
-        f"SI Range: {si_start}-{si_end}"
-    )
 
     matching_receipts = []
     for ej in ejournal_data:
@@ -330,12 +289,6 @@ for z in zread_data:
         , "Skipped SI"          : ej_skip
         , "Result"              : result
     })
-    logger.info(
-        f"Match Result | Z-Read: {z['file']} | "
-        f"Z Amount: {z['amount']} | "
-        f"E-Journal Total: {ej_total} | "
-        f"Result: {result}"
-    )
 
 # Show Summary & Table
 if result_table:
