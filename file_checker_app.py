@@ -72,7 +72,6 @@ def extract_zread_info(text):
         amount          = float(amount_match.group(1).replace(",", ""))
         si_start        = int(beginning_si.group(1))
         si_end          = int(ending_si.group(1))
-        # trans_count     = (int(si_end) - int(si_start))
         # Calculate transaction count including single transaction
         if si_start == 0 and si_end == 0:
             trans_count = 0
