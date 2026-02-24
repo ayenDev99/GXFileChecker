@@ -60,6 +60,7 @@ def load_config(config_path="config.json"):
 config = load_config("config.json") 
 
 def extract_zread_info(text):
+    from decimal import Decimal
     date_range = re.search(r"Date Range:\s*(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})", text)
     amount_match = re.search(r"NET SALES\s+([\d,]+\.\d{2})", text)
 
@@ -69,7 +70,7 @@ def extract_zread_info(text):
     if date_range and amount_match and beginning_si and ending_si:
         start_date      = datetime.strptime(date_range.group(1), "%m/%d/%Y").date()
         end_date        = datetime.strptime(date_range.group(2), "%m/%d/%Y").date()
-        amount          = float(amount_match.group(1).replace(",", ""))
+        amount          = Decimal(amount_match.group(1).replace(",", ""))
         si_start        = int(beginning_si.group(1))
         si_end          = int(ending_si.group(1))
         # Calculate transaction count including single transaction
@@ -83,6 +84,7 @@ def extract_zread_info(text):
     return None, None, None, None, None, None
 
 def extract_receipt_info(text):
+    from decimal import Decimal
 
     sales_amounts = []
     return_amounts = []
@@ -97,80 +99,89 @@ def extract_receipt_info(text):
         flags=re.IGNORECASE
     )
 
-    # parts structure:
-    # [header, type1, content1, type2, content2, ...]
-
+    # parts structure: [header, type1, content1, type2, content2, ...]
     for i in range(1, len(parts), 2):
         doc_type = parts[i].strip().upper()
         content = parts[i+1]
 
-        # Extract date once
-        if not date_val:
-            date_match = re.search(
-                r"\d{1,2}:\d{2}\s*(?:am|pm),\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{2},\s+\d{4}",
-                content,
-                re.IGNORECASE
-            )
-            if date_match:
-                date_str = date_match.group(0).split(", ", 1)[1]
-                date_val = datetime.strptime(date_str, "%B %d, %Y").date()
+        # --- DATE EXTRACTION ---
+        month_match = re.search(
+            r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{2},\s+\d{4}",
+            content,
+            re.IGNORECASE
+        )
+        md_match = re.search(r"(?:Date:)?(\d{2}/\d{2}/\d{4})", content, re.IGNORECASE)
 
-        # SALES
+        if month_match:
+            # Month format: January 01, 2025
+            date_val = datetime.strptime(month_match.group(0), "%B %d, %Y").date()
+            print(f"Month format detected: {date_val}")
+        elif md_match:
+            # MM/DD/YYYY format: 06/01/2025
+            date_str = md_match.group(1)
+            date_val = datetime.strptime(date_str, "%m/%d/%Y").date()
+            print(f"MM/DD/YYYY format detected: {date_val}")
+
+        # st.write(date_val)
+        # ---------- SALES ----------
         if "SALES INVOICE" in doc_type:
 
-            si_match = re.search(r"SI\s*#\s*:\s*(\d+)", content)
+            # First try: SI # : 12345
+            si_match = re.search(r"SI\s*#\s*:\s*(\d+)", content, re.IGNORECASE)
+
+            # Second option: Sales Invoice #: 12345
+            if not si_match:
+                si_match = re.search(r"Sales Invoice\s*#\s*:\s*(\d+)", content, re.IGNORECASE)
+
             if si_match:
                 si_numbers.append(int(si_match.group(1)))
 
-            amount_match = re.search(
-                r"Subtotal\s*:\s*([\d,]+\.\d{2})",
-                content,
-                re.IGNORECASE
+            # Extract tax components safely
+            def extract_tax_value(label, text):
+                # Allow optional minus sign before the number
+                pattern = rf"{label}\s*:\s*(?:₱)?\s*(-?[\d,]+(?:\.\d{{2}})?)"
+                match = re.search(pattern, text, re.IGNORECASE)
+                return Decimal(match.group(1).replace(",", "").strip()) if match else Decimal("0.00")
+
+            sale_total = (
+                extract_tax_value("VATable Sales", content)
+                + extract_tax_value("VAT Amount", content)
+                + extract_tax_value("VAT-Exempt Sales", content)
+                + extract_tax_value("Zero-Rated Sales", content)
             )
+            sales_amounts.append(sale_total)
+            # st.write(sale_total)
 
-            if amount_match:
-                sales_amounts.append(
-                    float(amount_match.group(1).replace(",", ""))
-                )
-
-        # RETURN
+        # ---------- RETURN ----------
         elif "RETURN" in doc_type:
-
             return_match = re.search(r"Return\s*#\s*:\s*(\d+)", content)
             if return_match:
                 return_numbers.append(int(return_match.group(1)))
 
-            amount_match = re.search(
-                r"Subtotal\s*:\s*-\s*([\d,]+\.\d{2})",
-                content,
-                re.IGNORECASE
-            )
+            # amount_match = re.search(r"Subtotal\s*:\s*-\s*([\d,]+\.\d{2})", content, re.IGNORECASE)
+            # if amount_match:
+            #     return_amounts.append(Decimal(amount_match.group(1).replace(",", "")))
 
-            if amount_match:
-                return_amounts.append(
-                    float(amount_match.group(1).replace(",", ""))
-                )
+            return_total = (
+                extract_tax_value("VATable Sales", content)
+                + extract_tax_value("VAT Amount", content)
+                + extract_tax_value("VAT-Exempt Sales", content)
+                + extract_tax_value("Zero-Rated Sales", content)
+            )
+            return_amounts.append(return_total)
+            # st.write(return_total)
 
     total_sales = sum(sales_amounts)
     total_returns = sum(return_amounts)
-    net_amount = total_sales - total_returns
-
+    net_amount = total_sales - abs(total_returns)
     total_trans_count = len(si_numbers)
+
 
     skipped_si = []
     if si_numbers:
-        skipped_si = [
-            i for i in range(min(si_numbers), max(si_numbers)+1)
-            if i not in si_numbers
-        ]
+        skipped_si = [i for i in range(min(si_numbers), max(si_numbers)+1) if i not in si_numbers]
 
-    return (
-        date_val,
-        net_amount,
-        total_trans_count,
-        si_numbers,
-        skipped_si
-    )
+    return date_val, net_amount, total_trans_count, si_numbers, skipped_si
 
 def highlight_mismatch_counts(row):
     # Highlight grand total row
