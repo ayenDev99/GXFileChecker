@@ -5,8 +5,10 @@ import pandas as pd
 from datetime import datetime, date
 import json
 
+APP_VERSION = "v1.0.0"
+
 st.set_page_config(page_title="GX BIR File Checker", page_icon="gx_icon.png", layout="wide")
-st.title("🧾 Z-Read & E-Journal Validation")
+st.title(f"🧾 Z-Read & E-Journal Validation ({APP_VERSION})")
 
 # Date Range Picker
 with st.expander("📅 Date Range Filter", expanded=True):
@@ -115,12 +117,12 @@ def extract_receipt_info(text):
         if month_match:
             # Month format: January 01, 2025
             date_val = datetime.strptime(month_match.group(0), "%B %d, %Y").date()
-            print(f"Month format detected: {date_val}")
+            # print(f"Month format detected: {date_val}")
         elif md_match:
             # MM/DD/YYYY format: 06/01/2025
             date_str = md_match.group(1)
             date_val = datetime.strptime(date_str, "%m/%d/%Y").date()
-            print(f"MM/DD/YYYY format detected: {date_val}")
+            # print(f"MM/DD/YYYY format detected: {date_val}")
 
         # Extract tax components safely
         def extract_tax_value(label, text):
