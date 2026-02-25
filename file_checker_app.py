@@ -122,6 +122,13 @@ def extract_receipt_info(text):
             date_val = datetime.strptime(date_str, "%m/%d/%Y").date()
             print(f"MM/DD/YYYY format detected: {date_val}")
 
+        # Extract tax components safely
+        def extract_tax_value(label, text):
+            # Allow optional minus sign before the number
+            pattern = rf"{label}\s*:\s*(?:₱)?\s*(-?[\d,]+(?:\.\d{{2}})?)"
+            match = re.search(pattern, text, re.IGNORECASE)
+            return Decimal(match.group(1).replace(",", "").strip()) if match else Decimal("0.00")        
+
         # st.write(date_val)
         # ---------- SALES ----------
         if "SALES INVOICE" in doc_type:
@@ -135,13 +142,6 @@ def extract_receipt_info(text):
 
             if si_match:
                 si_numbers.append(int(si_match.group(1)))
-
-            # Extract tax components safely
-            def extract_tax_value(label, text):
-                # Allow optional minus sign before the number
-                pattern = rf"{label}\s*:\s*(?:₱)?\s*(-?[\d,]+(?:\.\d{{2}})?)"
-                match = re.search(pattern, text, re.IGNORECASE)
-                return Decimal(match.group(1).replace(",", "").strip()) if match else Decimal("0.00")
 
             sale_total = (
                 extract_tax_value("VATable Sales", content)
@@ -157,10 +157,6 @@ def extract_receipt_info(text):
             return_match = re.search(r"Return\s*#\s*:\s*(\d+)", content)
             if return_match:
                 return_numbers.append(int(return_match.group(1)))
-
-            # amount_match = re.search(r"Subtotal\s*:\s*-\s*([\d,]+\.\d{2})", content, re.IGNORECASE)
-            # if amount_match:
-            #     return_amounts.append(Decimal(amount_match.group(1).replace(",", "")))
 
             return_total = (
                 extract_tax_value("VATable Sales", content)
