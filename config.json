@@ -1,4 +1,4 @@
 {
-    "zread_folder_path"       : "C:\\Z_TEST\\ZOut\\TimexShop-CentrioCDO"
-  , "ejournal_folder_path"    : "C:\\Z_TEST\\BIREjournals\\TimexShop-CentrioCDO"
+    "zread_folder_path"       : "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut"
+  , "ejournal_folder_path"    : "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals"
 } 
