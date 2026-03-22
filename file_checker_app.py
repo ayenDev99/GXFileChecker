@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, date
 import json
 
-APP_VERSION = "v1.0.0"
+APP_VERSION = "v1.0.1"
 
 st.set_page_config(page_title="GX BIR File Checker", page_icon="gx_icon.png", layout="wide")
 st.title(f"🧾 Z-Read & E-Journal Validation ({APP_VERSION})")
@@ -101,6 +101,8 @@ def extract_receipt_info(text):
         flags=re.IGNORECASE
     )
 
+    # st.write(parts)
+
     # parts structure: [header, type1, content1, type2, content2, ...]
     for i in range(1, len(parts), 2):
         doc_type = parts[i].strip().upper()
@@ -112,7 +114,10 @@ def extract_receipt_info(text):
             content,
             re.IGNORECASE
         )
-        md_match = re.search(r"(?:Date:)?(\d{2}/\d{2}/\d{4})", content, re.IGNORECASE)
+        # md_match = re.search(r"(?<!ISSUED:\s)(\d{2}/\d{2}/\d{4})", content)
+        md_match = re.search(r"(?<!ISSUED:\s)(\d{1,2}/\d{1,2}/\d{4})", content)
+
+        # st.write(md_match)
 
         if month_match:
             # Month format: January 01, 2025
@@ -141,6 +146,8 @@ def extract_receipt_info(text):
             # Second option: Sales Invoice #: 12345
             if not si_match:
                 si_match = re.search(r"Sales Invoice\s*#\s*:\s*(\d+)", content, re.IGNORECASE)
+            
+            # st.write(si_match)
 
             if si_match:
                 si_numbers.append(int(si_match.group(1)))
@@ -174,6 +181,10 @@ def extract_receipt_info(text):
     net_amount = total_sales - abs(total_returns)
     total_trans_count = len(si_numbers)
 
+    # st.write(total_sales)
+    # st.write(total_returns)
+    # st.write(net_amount)
+    # st.write(total_trans_count)
 
     skipped_si = []
     if si_numbers:
@@ -248,6 +259,12 @@ with st.spinner("Processing..."):
                     content = f.read()
                     date_val, amount, trans_count, si_numbers, skipped_si = extract_receipt_info(content)
 
+                    # st.write(start_date_range)
+                    # st.write(date_val)
+                    # st.write(end_date_range)
+
+                    # st.write('-----')     
+                       
                     if date_val and start_date_range <= date_val <= end_date_range:
                         ejournal_data.append({
                             "file"          : fname,
@@ -269,6 +286,7 @@ result_table = []
 for z in zread_data:
     si_start = z["si_start"]
     si_end = z["si_end"]
+    # st.write(ejournal_data)
 
     matching_receipts = []
     for ej in ejournal_data:
@@ -277,12 +295,16 @@ for z in zread_data:
                 matching_receipts.append(ej)
         else:
             pass
+  
+    # st.write(si_end)
+    # st.write(matching_receipts)
 
     ej_total = sum(r["amount"] if r["amount"] else 0 for r in matching_receipts)
     ej_count = sum(r["trans_count"] if r["trans_count"] else 0 for r in matching_receipts)
     ej_files = ", ".join(r["file"] for r in matching_receipts) if matching_receipts else "None"
     ej_skip = ", ".join(r["skipped_si"] for r in matching_receipts) if matching_receipts else ""
 
+    # st.write(ej_total)
     result = "MATCH" if abs(z["amount"] - ej_total) < 0.01 else "MISMATCH"
     result_table.append({
         "Date"                  : f"{z['start_date'].strftime('%m/%d/%Y')} - {z['end_date'].strftime('%m/%d/%Y')}"
