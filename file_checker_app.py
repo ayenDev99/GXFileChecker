@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, date
 import json
 
-APP_VERSION = "v1.0.1"
+APP_VERSION = "v1.0.2"
 
 st.set_page_config(page_title="GX BIR File Checker", page_icon="gx_icon.png", layout="wide")
 st.title(f"🧾 Z-Read & E-Journal Validation ({APP_VERSION})")
@@ -85,112 +85,117 @@ def extract_zread_info(text):
         return start_date, end_date, amount, tot_trans_count, si_start, si_end
     return None, None, None, None, None, None
 
-def extract_receipt_info(text):
-    from decimal import Decimal
-
-    sales_amounts = []
-    return_amounts = []
-    si_numbers = []
-    return_numbers = []
-    date_val = None
-
-    # Split keeping type
-    parts = re.split(
+def split_documents(text: str) -> list[tuple[str, str]]:
+    # ── Format 1: *** SALES INVOICE *** / *** Return *** ─────────────────────
+    fmt1_parts = re.split(
         r"\*{3}\s*(SALES INVOICE|Return)\s*\*{3}",
         text,
         flags=re.IGNORECASE
     )
+    if len(fmt1_parts) > 1:
+        return [
+            (fmt1_parts[i].strip().upper(), fmt1_parts[i + 1])
+            for i in range(1, len(fmt1_parts) - 1, 2)
+            if not re.search(r"\*{3}\s*Re-Print\s*\*{3}", fmt1_parts[i + 1], re.IGNORECASE)
+        ]
 
-    # st.write(parts)
+    # ── Format 2: Receipt Type: SALES INVOICE / Receipt Type: Return ──────────────────────────────
+    type_matches = list(re.finditer(
+        r"Receipt\s+Type:\s*(SALES INVOICE|Return)",
+        text,
+        flags=re.IGNORECASE
+    ))
 
-    # parts structure: [header, type1, content1, type2, content2, ...]
-    for i in range(1, len(parts), 2):
-        doc_type = parts[i].strip().upper()
-        content = parts[i+1]
+    if not type_matches:
+        return []
 
-        # --- DATE EXTRACTION ---
+    para_starts = [0] + [m.end() for m in re.finditer(r"\n[ \t]*\n", text)]
+
+    block_starts = [
+        max((p for p in para_starts if p <= tm.start()), default=0)
+        for tm in type_matches
+    ]
+
+    sections = []
+    for i, tm in enumerate(type_matches):
+        block = text[block_starts[i] : block_starts[i + 1] if i + 1 < len(block_starts) else len(text)]
+
+        if re.search(r"\*{3}\s*Re-Print\s*\*{3}", block, re.IGNORECASE):
+            continue  # ← skip reprints
+
+        sections.append((tm.group(1).strip().upper(), block))
+
+    return sections 
+
+def extract_receipt_info(text):
+
+    from decimal import Decimal
+
+    sales_amounts  = []
+    return_amounts = []
+    si_numbers     = []
+    return_numbers = []
+    date_val       = None
+    sales_count    = 0
+
+    def extract_tax_value(label, content):
+        pattern = rf"{label}\s*:\s*(?:₱)?\s*(-?[\d,]+(?:\.\d{{2}})?)"
+        match = re.search(pattern, content, re.IGNORECASE)
+        return Decimal(match.group(1).replace(",", "").strip()) if match else Decimal("0.00")
+
+    for doc_type, content in split_documents(text):
+
+        # ── Date extraction ───────────────────────────────────────────────────
         month_match = re.search(
-            r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{2},\s+\d{4}",
-            content,
-            re.IGNORECASE
+            r"(January|February|March|April|May|June|July|August"
+            r"|September|October|November|December)\s+\d{1,2},\s+\d{4}",
+            content, re.IGNORECASE
         )
-        # md_match = re.search(r"(?<!ISSUED:\s)(\d{2}/\d{2}/\d{4})", content)
         md_match = re.search(r"(?<!ISSUED:\s)(\d{1,2}/\d{1,2}/\d{4})", content)
 
-        # st.write(md_match)
-
         if month_match:
-            # Month format: January 01, 2025
             date_val = datetime.strptime(month_match.group(0), "%B %d, %Y").date()
-            # print(f"Month format detected: {date_val}")
         elif md_match:
-            # MM/DD/YYYY format: 06/01/2025
-            date_str = md_match.group(1)
-            date_val = datetime.strptime(date_str, "%m/%d/%Y").date()
-            # print(f"MM/DD/YYYY format detected: {date_val}")
+            date_val = datetime.strptime(md_match.group(1), "%m/%d/%Y").date()
 
-        # Extract tax components safely
-        def extract_tax_value(label, text):
-            # Allow optional minus sign before the number
-            pattern = rf"{label}\s*:\s*(?:₱)?\s*(-?[\d,]+(?:\.\d{{2}})?)"
-            match = re.search(pattern, text, re.IGNORECASE)
-            return Decimal(match.group(1).replace(",", "").strip()) if match else Decimal("0.00")        
-
-        # st.write(date_val)
-        # ---------- SALES ----------
+        # ── Sales Invoice ─────────────────────────────────────────────────────
         if "SALES INVOICE" in doc_type:
+            sales_count += 1
 
-            # First try: SI # : 12345
-            si_match = re.search(r"SI\s*#\s*:\s*(\d+)", content, re.IGNORECASE)
-
-            # Second option: Sales Invoice #: 12345
-            if not si_match:
-                si_match = re.search(r"Sales Invoice\s*#\s*:\s*(\d+)", content, re.IGNORECASE)
-            
-            # st.write(si_match)
-
+            si_match = (
+                re.search(r"SI\s*#\s*:\s*(\d+)", content, re.IGNORECASE)
+                or re.search(r"Sales Invoice\s*#\s*:\s*(\d+)", content, re.IGNORECASE)
+            )
             if si_match:
                 si_numbers.append(int(si_match.group(1)))
 
-            sale_total = (
-                extract_tax_value("VATable Sales", content)
-                + extract_tax_value("VAT Amount", content)
+            sales_amounts.append(
+                extract_tax_value("VATable Sales",     content)
+                + extract_tax_value("VAT Amount",      content)
                 + extract_tax_value("VAT-Exempt Sales", content)
                 + extract_tax_value("Zero-Rated Sales", content)
             )
-            sales_amounts.append(sale_total)
-            # st.write(sale_total)
 
-        # ---------- RETURN ----------
+        # ── Return ────────────────────────────────────────────────────────────
         elif "RETURN" in doc_type:
             return_match = re.search(r"Return\s*#\s*:\s*(\d+)", content)
             if return_match:
                 return_numbers.append(int(return_match.group(1)))
 
-            return_total = (
-                extract_tax_value("VATable Sales", content)
-                + extract_tax_value("VAT Amount", content)
+            return_amounts.append(
+                extract_tax_value("VATable Sales",     content)
+                + extract_tax_value("VAT Amount",      content)
                 + extract_tax_value("VAT-Exempt Sales", content)
                 + extract_tax_value("Zero-Rated Sales", content)
             )
-            return_amounts.append(return_total)
-            # st.write(return_total)
 
-    total_sales = sum(sales_amounts)
-    total_returns = sum(return_amounts)
-    net_amount = total_sales - abs(total_returns)
-    total_trans_count = len(si_numbers)
+    net_amount    = sum(sales_amounts) - abs(sum(return_amounts))
+    skipped_si    = (
+        sorted(set(range(min(si_numbers), max(si_numbers) + 1)) - set(si_numbers))
+        if si_numbers else []
+    )
 
-    # st.write(total_sales)
-    # st.write(total_returns)
-    # st.write(net_amount)
-    # st.write(total_trans_count)
-
-    skipped_si = []
-    if si_numbers:
-        skipped_si = [i for i in range(min(si_numbers), max(si_numbers)+1) if i not in si_numbers]
-
-    return date_val, net_amount, total_trans_count, si_numbers, skipped_si
+    return date_val, net_amount, sales_count, si_numbers, skipped_si
 
 def highlight_mismatch_counts(row):
     # Highlight grand total row

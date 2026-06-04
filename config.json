@@ -1,4 +1,31 @@
 {
-    "zread_folder_path"       : "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut"
-  , "ejournal_folder_path"    : "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals"
-} 
+  "zread_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut",
+  "ejournal_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals"
+
+
+  , "_comment_1": 
+  {
+    "zread_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut\\DONE\\ATC-AyalaCebu",
+    "ejournal_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals\\DONE\\ATC-AyalaCebu"
+  }
+
+  , "_comment_2": 
+  {
+    "zread_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut\\DONE\\ATC-SMMegamall",
+    "ejournal_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals\\DONE\\ATC-SMMegamall"
+  }
+
+  , "_comment_3": 
+  {
+    "zread_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut\\DONE\\TimexShop-CentrioCDO",
+    "ejournal_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals\\DONE\\TimexShop-CentrioCDO"
+  }
+
+  , "_comment_4": 
+  {
+    "zread_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\ZOut\\DONE\\WatchRepublic-Ermita",
+    "ejournal_folder_path": "C:\\ProgramData\\RetailPro\\Server\\WebClient\\customizations\\plugins\\BIREjournals\\DONE\\WatchRepublic-Ermita"
+  }
+
+  
+}

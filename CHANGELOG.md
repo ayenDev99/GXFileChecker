@@ -21,5 +21,9 @@
 #                                                   > NEWTRENDS - Timex Shop - Centrio CDO
 # 1.0.1   | PATCH  | 2026-03-12 | Karen Ancheta   | Bugfix : Getting "Date Issued" instead of Transaction Date.
 #                                                   > NEWTRENDS - Watch Republic Robinsons Ermita
+# 1.0.2   | PATCH  | 2026-05-13 | Karen Ancheta   | Bugfix : Refactor spliting BIREjournals transactions.
+#                                                 | Format 1: *** SALES INVOICE *** / *** Return ***
+#                                                 | Format 2: Receipt Type: SALES INVOICE / Receipt Type: Return
+#                                                   > VOGUE - Yves Rocher - SM MOA
 #
 # *************************************************************************************/
